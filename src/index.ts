@@ -2,39 +2,35 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import dotenv from "dotenv";
-import { apiCall } from "./helper.js";
+import { apiCall, authenticatedApiCall } from "./helper.js";
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
-// Load environment variables
-dotenv.config();
+// Get the directory of the current file
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
-const NEST_API_URL = process.env.BASE_URL;
+// Load environment variables from the correct location
+// Try to load from the same directory as the source file first, then from build directory
+dotenv.config({ path: join(__dirname, '.env') });
+dotenv.config({ path: join(__dirname, '..', '.env') });
+
+export const NEST_API_URL = process.env.BASE_URL;
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
+
+if (!NEST_API_URL) {
+  throw new Error("BASE_URL is not set");
+}
+
+if (!ACCESS_TOKEN) {
+  throw new Error("ACCESS_TOKEN is not set");
+}
 
 // Create MCP server
 const server = new McpServer({
   name: "nest-banking-mcp",
   version: "1.0.0"
 });
-
-// Resource: User Accounts
-server.registerResource(
-  "users",
-  "bank://users",
-  {
-    title: "User Accounts",
-    description: "List of all users and their account balances",
-    mimeType: "application/json"
-  },
-  async (uri) => {
-    const users = await apiCall('/users');
-    return {
-      contents: [{
-        uri: uri.href,
-        text: JSON.stringify(users, null, 2),
-        mimeType: "application/json"
-      }]
-    };
-  }
-);
 
 // Resource: FX Rate
 server.registerResource(
@@ -57,59 +53,26 @@ server.registerResource(
   }
 );
 
-// Tool: Get User Balance
+// Tool: Get My Balance (authenticated - user's own account)
 server.registerTool(
-  "get-user-balance",
+  "get-my-balance",
   {
-    title: "Get User Balance",
-    description: "Get account balances for a specific user",
-    inputSchema: {
-      userId: z.string().optional(),
-      userName: z.string().optional()
-    }
+    title: "Get My Balance",
+    description: "Get your own account balances (requires authentication)",
+    inputSchema: {}
   },
-  async ({ userId, userName }) => {
+  async () => {
     try {
-      // If no userId provided, try to find by name or list all users
-      if (!userId && !userName) {
-        const users = await apiCall('/users');
+      // Get user's own data using authentication
+      const user = await authenticatedApiCall('/me', ACCESS_TOKEN);
+      
+      if (!user || user.error) {
         return {
           content: [{
             type: "text",
-            text: "Please specify a user. Available users:\n" + 
-                  users.map((u: any) => `- ${u.name} (ID: ${u.id})`).join("\n")
-          }]
-        };
-      }
-      
-      if (!userId && userName) {
-        // Find user by name
-        const users = await apiCall('/users');
-        const user = users.find((u: any) => 
-          u.name.toLowerCase() === userName.toLowerCase()
-        );
-        
-        if (!user) {
-          return {
-            content: [{
-              type: "text",
-              text: `User "${userName}" not found. Available users:\n` +
-                    users.map((u: any) => `- ${u.name} (ID: ${u.id})`).join("\n")
-            }]
-          };
-        }
-        
-        userId = user.id;
-      }
-      
-      const user = await apiCall(`/users/${userId}`);
-      
-      if (!user) {
-        return {
-          content: [{
-            type: "text",
-            text: "User not found"
-          }]
+            text: user?.error || "Authentication failed"
+          }],
+          isError: true
         };
       }
       
@@ -120,14 +83,14 @@ server.registerTool(
       return {
         content: [{
           type: "text",
-          text: `${user.name}'s Account Balances:\n${balanceText}`
+          text: `Your Account Balances:\n${balanceText}`
         }]
       };
     } catch (error) {
       return {
         content: [{
           type: "text",
-          text: `Error fetching user balance: ${error}`
+          text: `Error fetching your balance: ${error}`
         }],
         isError: true
       };
@@ -164,14 +127,13 @@ server.registerTool(
   }
 );
 
-// Tool: Check Transfer Eligibility (Agentic pre-condition checking)
+// Tool: Check Transfer Eligibility (authenticated)
 server.registerTool(
   "check-transfer-eligibility",
   {
     title: "Check Transfer Eligibility",
-    description: "Verify if a transfer can be made based on balance and conditions",
+    description: "Verify if a transfer can be made based on your balance and conditions",
     inputSchema: {
-      userId: z.string(),
       fromCurrency: z.enum(["AUD", "USD"]),
       amount: z.number(),
       fxRateCondition: z.object({
@@ -180,14 +142,16 @@ server.registerTool(
       }).optional()
     }
   },
-  async ({ userId, fromCurrency, amount, fxRateCondition }) => {
+  async ({ fromCurrency, amount, fxRateCondition }) => {
     try {
-      const user = await apiCall(`/users/${userId}`);
-      if (!user) {
+      // Get user's own data using authentication
+      const user = await authenticatedApiCall('/me', ACCESS_TOKEN);
+      
+      if (!user || user.error) {
         return {
           content: [{
             type: "text",
-            text: "User not found"
+            text: user?.error || "Authentication failed"
           }],
           isError: true
         };
@@ -198,7 +162,7 @@ server.registerTool(
         return {
           content: [{
             type: "text",
-            text: `User does not have a ${fromCurrency} account`
+            text: `You do not have a ${fromCurrency} account`
           }],
           isError: true
         };
@@ -250,90 +214,50 @@ server.registerTool(
   }
 );
 
-// Tool: Transfer Funds with Elicitation
+// Tool: Transfer Funds (authenticated)
 server.registerTool(
   "transfer-funds",
   {
     title: "Transfer Funds",
-    description: "Transfer funds between accounts with optional FX rate condition",
+    description: "Transfer funds between your accounts with mandatory FX rate condition",
     inputSchema: {
-      userId: z.string().optional(),
-      userName: z.string().optional(),
       amount: z.number(),
       fromCurrency: z.enum(["AUD", "USD"]),
       toCurrency: z.enum(["AUD", "USD"]).optional(),
       fxRateCondition: z.object({
         operator: z.enum(["below", "above"]),
         value: z.number()
-      }).optional()
+      })
     }
   },
-  async ({ userId, userName, amount, fromCurrency, toCurrency, fxRateCondition }) => {
+  async ({ amount, fromCurrency, toCurrency, fxRateCondition }) => {
     try {
-      // Step 1: Identify user (with elicitation if needed)
-      if (!userId && !userName) {
-        const users = await apiCall('/users');
-        
-        const result = await server.server.elicitInput({
-          message: "Please select the user for this transfer:",
-          requestedSchema: {
-            type: "object",
-            properties: {
-              userId: {
-                type: "string",
-                title: "User",
-                enum: users.map((u: any) => u.id),
-                enumNames: users.map((u: any) => `${u.name} (ID: ${u.id})`)
-              }
-            },
-            required: ["userId"]
-          }
-        });
-        
-        if (result.action !== "accept" || !result.content?.userId) {
-          return {
-            content: [{
-              type: "text",
-              text: "Transfer cancelled - no user selected"
-            }]
-          };
-        }
-        
-        userId = result.content.userId as string;
-      } else if (!userId && userName) {
-        const users = await apiCall('/users');
-        const user = users.find((u: any) => 
-          u.name.toLowerCase() === userName.toLowerCase()
-        );
-        
-        if (!user) {
-          return {
-            content: [{
-              type: "text",
-              text: `User "${userName}" not found`
-            }],
-            isError: true
-          };
-        }
-        
-        userId = user.id;
+      // Get user's own data using authentication
+      const user = await authenticatedApiCall('/me', ACCESS_TOKEN);
+      
+      if (!user || user.error) {
+        return {
+          content: [{
+            type: "text",
+            text: user?.error || "Authentication failed"
+          }],
+          isError: true
+        };
       }
       
-      // Step 2: Get user details and verify source account
-      const user = await apiCall(`/users/${userId}`);
       const fromAccount = user.accounts.find((a: any) => a.currency === fromCurrency);
       
       if (!fromAccount) {
         return {
           content: [{
             type: "text",
-            text: `User ${user.name} does not have a ${fromCurrency} account`
+            text: `You do not have a ${fromCurrency} account`
           }],
           isError: true
         };
       }
       
-      // Step 3: Check balance (Agentic pre-condition)
+      // Check balance
       if (fromAccount.balance < amount) {
         return {
           content: [{
@@ -346,7 +270,7 @@ server.registerTool(
         };
       }
       
-      // Step 4: Handle missing target currency (Elicitation)
+      // Handle missing target currency (Elicitation)
       if (!toCurrency) {
         const availableCurrencies = user.accounts
           .filter((a: any) => a.currency !== fromCurrency)
@@ -393,7 +317,7 @@ server.registerTool(
         toCurrency = result.content.toCurrency as "AUD" | "USD";
       }
       
-      // Step 5: Check FX rate condition if specified (Agentic pre-condition)
+      // Check FX rate condition if specified
       if (fxRateCondition && fromCurrency !== toCurrency) {
         const fx = await apiCall('/fx');
         const currentRate = fx.fxRate;
@@ -413,11 +337,10 @@ server.registerTool(
         }
       }
       
-      // Step 6: Execute transfer
-      const transferResult = await apiCall('/transfer', {
+      // Execute transfer using authentication
+      const transferResult = await authenticatedApiCall('/transfer', ACCESS_TOKEN, {
         method: 'POST',
         body: JSON.stringify({
-          userId,
           from: fromCurrency,
           to: toCurrency,
           amount
@@ -463,12 +386,42 @@ server.registerTool(
   }
 );
 
+// Tool: Get Access Token Info
+server.registerTool(
+  "get-access-token-info",
+  {
+    title: "Get Access Token Info",
+    description: "Get information about the current access token",
+    inputSchema: {}
+  },
+  async () => {
+    try {
+      return {
+        content: [{
+          type: "text",
+          text: `Current Access Token: ${ACCESS_TOKEN}\n\n` +
+                `This token is configured in your .env file and is used automatically ` +
+                `for all authenticated operations.`
+        }]
+      };
+    } catch (error) {
+      return {
+        content: [{
+          type: "text",
+          text: `Error getting access token info: ${error}`
+        }],
+        isError: true
+      };
+    }
+  }
+);
+
 // Prompt: Transfer Assistant
 server.registerPrompt(
   "transfer-assistant",
   {
     title: "Transfer Assistant",
-    description: "Helps guide users through the fund transfer process",
+    description: "Helps guide users through the authenticated fund transfer process",
     argsSchema: {
       userRequest: z.string()
     }
@@ -481,20 +434,21 @@ server.registerPrompt(
         text: `You are a helpful banking assistant integrated with a NestJS banking API. 
         The user wants to: "${userRequest}"
         
+        IMPORTANT: This system uses personal access tokens for security. All user data 
+        requires authentication - no user information is publicly accessible.
+        
+        Access token is configured in environment variables and is used automatically.
+        The backend automatically identifies the user based on the token.
+        
         Help them complete their transfer by:
-        1. Identifying the user (by name or ID)
-        2. Checking their account balances first
-        3. Verifying exchange rates if transferring between currencies
-        4. Ensuring all preconditions are met (sufficient balance, valid accounts)
-        5. Checking FX rate conditions if specified
-        6. Guiding them through any missing information
-        7. Executing the transfer when all conditions are satisfied
+        1. Checking their account balances using authenticated endpoints
+        2. Verifying exchange rates if transferring between currencies
+        3. Ensuring all preconditions are met (sufficient balance, valid accounts)
+        4. Checking FX rate conditions if specified
+        5. Guiding them through any missing information
+        6. Executing the transfer when all conditions are satisfied
         
-        Always be proactive in checking preconditions. The system will automatically 
-        prompt for missing information through elicitation.
-        
-        Available users in the system: Alice (ID: 1) and Bob (ID: 2).
-        Each user has both AUD and USD accounts.`
+        Use "get-my-balance" and "transfer-funds" tools directly - no token input needed.`
       }
     }]
   })
@@ -506,6 +460,7 @@ async function main() {
   await server.connect(transport);
   console.error("NestJS Banking MCP server running on stdio transport");
   console.error(`Connected to NestJS API at: ${NEST_API_URL}`);
+  console.error(`Using access token: ${ACCESS_TOKEN}`);
 }
 
 main().catch((error) => {

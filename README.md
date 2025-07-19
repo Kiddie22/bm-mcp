@@ -1,69 +1,141 @@
-# Banking MCP Server
+# NestJS Banking MCP Server
 
-This project implements a Model Context Protocol (MCP) server that provides banking tools for AI assistants like Claude Desktop.
+A Model Context Protocol (MCP) server that provides banking functionality through a NestJS backend API with personal access token authentication.
 
-## Project Structure
+## Features
 
-- `server/` - NestJS server with mock banking APIs
-- `src/index.ts` - MCP server that exposes banking tools
+- **Secure Authentication**: Personal access tokens ensure users can only access their own accounts
+- **Account Management**: View balances and transfer funds between AUD and USD accounts
+- **FX Rate Management**: Real-time exchange rate tracking and conditional transfers
+- **Agentic Pre-condition Checking**: Automatic validation of transfer eligibility
+- **User Elicitation**: Interactive prompts for missing information
+- **Complete Data Privacy**: All user data requires authentication - nothing is publicly accessible
 
-## Setup
+## Security Model
 
-### 1. Start the Banking API Server
+This banking system implements a secure authentication model where:
 
-```bash
-cd server
-npm run start
+- Each user has a unique personal access token
+- Users can only view and modify their own accounts
+- All user data requires authentication - no public access
+- Only exchange rates are publicly accessible
+- Access token is configured in environment variables
+- Backend automatically identifies users by token
+
+## Available Users
+
+The system comes with two demo users with hard-coded access tokens:
+
+- **Alice** - Access Token: `alice_token_12345`
+- **Bob** - Access Token: `bob_token_67890`
+
+## Environment Configuration
+
+Create a `.env` file in the root directory with the following variables:
+
+```env
+BASE_URL=http://localhost:3000
+ACCESS_TOKEN=alice_token_12345
 ```
 
-The banking API will be available at `http://localhost:3000`
-
-### 2. Start the MCP Server
-
-In a new terminal:
-
-```bash
-npm run start:mcp
-```
-
-## Available Tools
-
-The MCP server provides the following tools:
-
-1. **get_users** - Get all users and their account balances
-2. **get_user_by_id** - Get a specific user by ID
-3. **get_fx_rate** - Get current FX rate (AUD to USD)
-4. **transfer_funds** - Transfer funds between AUD and USD accounts
-
-## Usage with Claude Desktop
-
-1. Add the mcpServer to your Claude Desktop configuration directory
-2. Restart Claude Desktop
-3. The banking tools will be available in your conversations
-
-## Sample Banking Scenario
-
-You can test the MCP server with prompts like:
-
-- "Transfer 800 AUD from my AUD account if FX below 0.7"
-- "What's the current FX rate?"
-- "Show me user 1's account balances"
-- "Update the FX rate to 0.65"
+To switch between users, simply change the `ACCESS_TOKEN` value in your `.env` file.
 
 ## API Endpoints
 
-The underlying banking API provides:
+### Public Endpoints (No Authentication Required)
 
-- `GET /users` - List all users
-- `GET /users/:id` - Get user by ID
-- `GET /fx` - Get FX rate
-- `POST /transfer` - Transfer funds
+- `GET /fx` - Get current exchange rate
 
-## Demo Features
+### Authenticated Endpoints (Require Bearer Token)
 
-This implementation demonstrates:
+- `GET /me` - Get your own account information
+- `POST /transfer` - Transfer funds between your accounts
 
-1. **Elicitation** - The agent can ask for missing information (e.g., target account)
-2. **Agentic Thinking** - Pre-condition checks (FX rate, account balances) before transfers
-3. **Tool Routing** - Automatic selection of appropriate tools based on user intent
-4. **Reasoning** - Logical decision making based on current state and user requirements
+## MCP Tools
+
+### Public Tools
+
+- `get-fx-rate` - Get current exchange rate
+- `get-access-token-info` - Get information about the current access token
+
+### Authenticated Tools
+
+- `get-my-balance` - View your own account balances
+- `check-transfer-eligibility` - Verify transfer conditions
+- `transfer-funds` - Transfer funds between your accounts
+
+## Usage Example
+
+1. **Check your balance**:
+
+   ```
+   Use tool: get-my-balance
+   ```
+
+2. **Transfer funds**:
+
+   ```
+   Use tool: transfer-funds with amount: 100, fromCurrency: "AUD", toCurrency: "USD"
+   ```
+
+3. **Get token information**:
+   ```
+   Use tool: get-access-token-info
+   ```
+
+## Setup
+
+1. Install dependencies:
+
+   ```bash
+   npm install
+   cd server && npm install
+   ```
+
+2. Create `.env` file with your configuration:
+
+   ```bash
+   cp .env.example .env
+   # Edit .env with your preferred access token
+   ```
+
+3. Start the NestJS server:
+
+   ```bash
+   cd server
+   npm run start:dev
+   ```
+
+4. Start the MCP server:
+   ```bash
+   npm start
+   ```
+
+## Environment Variables
+
+- `BASE_URL` - NestJS API base URL (default: http://localhost:3000)
+- `ACCESS_TOKEN` - Your access token (default: alice_token_12345)
+
+## Switching Between Users
+
+To switch between users, simply update your `.env` file:
+
+```env
+# To use Alice's account
+ACCESS_TOKEN=alice_token_12345
+
+# To use Bob's account
+ACCESS_TOKEN=bob_token_67890
+```
+
+Then restart the MCP server for the changes to take effect.
+
+## Security Notes
+
+- This is a mock system using hard-coded access tokens for demonstration
+- Access token is configured in environment variables for security
+- No token input required in tools - authentication is automatic
+- Backend automatically identifies users by matching tokens
+- In production, implement proper token generation, storage, and expiration
+- Consider adding rate limiting and additional security measures
+- All user data is completely private and requires authentication

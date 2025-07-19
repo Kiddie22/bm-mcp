@@ -1,52 +1,38 @@
-import { request } from "http";
-import { URL } from "url";
-
-const NEST_API_URL = process.env.BASE_URL || "http://localhost:3000";
+import { NEST_API_URL } from "./index.js";
 
 // Helper function to make API calls
 export async function apiCall(endpoint: string, options?: any): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const url = new URL(`${NEST_API_URL}${endpoint}`);
-    const method = options?.method || 'GET';
-    const body = options?.body;
-    
-    const req = request({
-      hostname: url.hostname,
-      port: url.port || (url.protocol === 'https:' ? 443 : 80),
-      path: url.pathname + url.search,
-      method: method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
-    }, (res) => {
-      let data = '';
-      
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-      
-      res.on('end', () => {
-        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-          try {
-            resolve(JSON.parse(data));
-          } catch (e) {
-            resolve(data);
-          }
-        } else {
-          reject(new Error(`API call failed: ${res.statusCode} ${res.statusMessage}`));
-        }
-      });
-    });
-    
-    req.on('error', (err) => {
-      reject(err);
-    });
-    
-    if (body) {
-      req.write(body);
+  const url = `${NEST_API_URL}${endpoint}`;
+  const method = options?.method || 'GET';
+  
+  const response = await fetch(url, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+    body: options?.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  if (!response.ok) {
+    throw new Error(`API call failed: ${response.status} ${response.statusText}`);
+  }
+
+  const contentType = response.headers.get('content-type');
+  if (contentType?.includes('application/json')) {
+    return response.json();
+  }
+  
+  return response.text();
+}
+
+// Helper function for authenticated API calls
+export async function authenticatedApiCall(endpoint: string, token: string, options?: any): Promise<any> {
+  return apiCall(endpoint, {
+    ...options,
+    headers: {
+      ...options?.headers,
+      'Authorization': `Bearer ${token}`
     }
-    
-    req.end();
   });
 }
