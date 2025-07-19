@@ -5,8 +5,7 @@ This project implements a Model Context Protocol (MCP) server that provides bank
 ## Project Structure
 
 - `server/` - NestJS server with mock banking APIs
-- `src/mcp-server.ts` - MCP server that exposes banking tools
-- `mcp-config.json` - Configuration for Claude Desktop
+- `src/index.ts` - MCP server that exposes banking tools
 
 ## Setup
 
